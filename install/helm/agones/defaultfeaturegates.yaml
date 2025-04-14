@@ -30,6 +30,8 @@ PortPolicyNone: false
 ScheduledAutoscaler: false
 
 # Dev features
+AllocatorPatchesGameservers: false
+AllocatorBatchesChanges: false
 
 # Example feature
 Example: false

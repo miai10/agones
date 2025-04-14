@@ -949,6 +949,34 @@ func (gs *GameServer) Patch(delta *GameServer) ([]byte, error) {
 	return result, errors.Wrapf(err, "error creating json for patch for GameServer %s", gs.ObjectMeta.Name)
 }
 
+func (gs *GameServer) PatchUnsafe(delta *GameServer) ([]byte, error) {
+	var result []byte
+
+	oldJSON, err := json.Marshal(gs)
+	if err != nil {
+		return result, errors.Wrapf(err, "error marshalling to json current GameServer %s", gs.ObjectMeta.Name)
+	}
+
+	newJSON, err := json.Marshal(delta)
+	if err != nil {
+		return result, errors.Wrapf(err, "error marshalling to json delta GameServer %s", delta.ObjectMeta.Name)
+	}
+
+	patch, err := jsonpatch.CreatePatch(oldJSON, newJSON)
+	if err != nil {
+		return result, errors.Wrapf(err, "error creating patch for GameServer %s", gs.ObjectMeta.Name)
+	}
+
+	// Per https://jsonpatch.com/ "Tests that the specified value is set in the document. If the test
+	// fails, then the patch as a whole should not apply."
+	// Used here to check the object has not been updated (has not changed ResourceVersion).
+	//patches := []jsonpatch.JsonPatchOperation{{Operation: "test", Path: "/metadata/resourceVersion", Value: gs.ObjectMeta.ResourceVersion}}
+	//patches = append(patches, patch...)
+
+	result, err = json.Marshal(patch)
+	return result, errors.Wrapf(err, "error creating json for patch for GameServer %s", gs.ObjectMeta.Name)
+}
+
 // UpdateCount increments or decrements a CounterStatus on a Game Server by the given amount.
 func (gs *GameServer) UpdateCount(name string, action string, amount int64) error {
 	if !(action == GameServerPriorityIncrement || action == GameServerPriorityDecrement) {

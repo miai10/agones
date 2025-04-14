@@ -73,6 +73,12 @@ const (
 	////////////////
 	// Dev features
 
+	// FeatureAllocatorPatchesGameservers is a feature flag to enable/disable the allocator using patch instead of update to update the gameserver CRD.
+	FeatureAllocatorPatchesGameservers Feature = "AllocatorPatchesGameservers"
+
+	// FeatureAllocatorBatchesChanges is a feature flag to enable/disable the allocator using batches to update the gameserver CRD.
+	FeatureAllocatorBatchesChanges Feature = "AllocatorBatchesChanges"
+
 	////////////////
 	// Example feature
 
@@ -146,6 +152,8 @@ var (
 		FeatureScheduledAutoscaler:           false,
 
 		// Dev features
+		FeatureAllocatorPatchesGameservers: false,
+		FeatureAllocatorBatchesChanges:     true,
 
 		// Example feature
 		FeatureExample: false,
