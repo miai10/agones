@@ -49,6 +49,7 @@ import (
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	runtimeschema "k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	informercorev1 "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
@@ -174,7 +175,11 @@ func (c *Allocator) Run(ctx context.Context) error {
 	}
 
 	// workers and logic for batching allocations
-	go c.ListenAndAllocate(ctx, maxBatchQueue)
+	if runtime.FeatureEnabled(runtime.FeatureCountsAndLists) && runtime.FeatureEnabled(runtime.FeatureAllocatorBatchesChanges) {
+		go c.ListenAndBatchAllocate(ctx, maxBatchQueue)
+	} else {
+		go c.ListenAndAllocate(ctx, maxBatchQueue)
+	}
 
 	return nil
 }
@@ -511,6 +516,7 @@ func (c *Allocator) ListenAndAllocate(ctx context.Context, updateWorkerCount int
 	var list []*agonesv1.GameServer
 	var sortKey uint64
 	requestCount := 0
+	batchSize := c.newMetrics(ctx)
 
 	for {
 		select {
@@ -557,6 +563,7 @@ func (c *Allocator) ListenAndAllocate(ctx context.Context, updateWorkerCount int
 				req.response <- response{request: req, gs: nil, err: err}
 				continue
 			}
+
 			// remove the game server that has been allocated
 			list = append(list[:index], list[index+1:]...)
 
@@ -571,6 +578,9 @@ func (c *Allocator) ListenAndAllocate(ctx context.Context, updateWorkerCount int
 		case <-ctx.Done():
 			return
 		default:
+			if requestCount > 0 {
+				batchSize.recordAllocationsBatchSize(ctx, requestCount)
+			}
 			list = nil
 			requestCount = 0
 			// slow down cpu churn, and allow items to batch
@@ -621,6 +631,11 @@ func (c *Allocator) allocationUpdateWorkers(ctx context.Context, workerCount int
 // applyAllocationToGameServer patches the inputted GameServer with the allocation metadata changes, and updates it to the Allocated State.
 // Returns the updated GameServer.
 func (c *Allocator) applyAllocationToGameServer(ctx context.Context, mp allocationv1.MetaPatch, gs *agonesv1.GameServer, gsa *allocationv1.GameServerAllocation) (*agonesv1.GameServer, error) {
+	var gsOriginal *agonesv1.GameServer
+	if runtime.FeatureEnabled(runtime.FeatureAllocatorPatchesGameservers) {
+		gsOriginal = gs.DeepCopy()
+	}
+
 	// patch ObjectMeta labels
 	if mp.Labels != nil {
 		if gs.ObjectMeta.Labels == nil {
@@ -663,7 +678,19 @@ func (c *Allocator) applyAllocationToGameServer(ctx context.Context, mp allocati
 		}
 	}
 
-	gsUpdate, updateErr := c.gameServerGetter.GameServers(gs.ObjectMeta.Namespace).Update(ctx, gs, metav1.UpdateOptions{})
+	var updateErr error
+	var gsUpdate *agonesv1.GameServer
+	if runtime.FeatureEnabled(runtime.FeatureAllocatorPatchesGameservers) {
+		patch, err := gsOriginal.PatchUnsafe(gs)
+		if err != nil {
+			return gsOriginal, errors.Wrapf(err, "error computing the gs patch")
+		}
+		gsUpdate, err = c.gameServerGetter.GameServers(gs.ObjectMeta.Namespace).Patch(ctx, gs.GetObjectMeta().GetName(), types.JSONPatchType, patch, metav1.PatchOptions{})
+		updateErr = errors.Wrapf(err, "error returned by the patch request using %s", string(patch))
+	} else {
+		gsUpdate, updateErr = c.gameServerGetter.GameServers(gs.ObjectMeta.Namespace).Update(ctx, gs, metav1.UpdateOptions{})
+	}
+
 	if updateErr != nil {
 		return gsUpdate, updateErr
 	}
